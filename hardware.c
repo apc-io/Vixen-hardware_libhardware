@@ -139,6 +139,20 @@ int hw_get_module_by_class(const char *class_id, const char *inst,
      * We also assume that dlopen() is thread-safe.
      */
 
+    /* Loop through wmt.class_id.so.path firstly, for example wmt.gps.so.path=/system/lib/hw/gps.xx.so */
+    snprintf(prop, sizeof(path), "wmt.%s.so.path", name);
+    if (property_get(prop, path, NULL) != 0) {
+        if (access(path, R_OK) == 0) {
+            ALOGD("load: %s/%s module=%s", name, prop, path);
+            i = 0;
+            goto find_out;
+        }
+        else {
+            ALOGW("load: %s/%s module %s failed: %s", name, prop, path, strerror(errno));
+        }
+    }
+
+
     /* Loop through the configuration variants looking for a module */
     for (i=0 ; i<HAL_VARIANT_KEYS_COUNT+1 ; i++) {
         if (i < HAL_VARIANT_KEYS_COUNT) {
@@ -158,6 +172,8 @@ int hw_get_module_by_class(const char *class_id, const char *inst,
             if (access(path, R_OK) == 0) break;
         }
     }
+
+find_out:
 
     status = -ENOENT;
     if (i < HAL_VARIANT_KEYS_COUNT+1) {

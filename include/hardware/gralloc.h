@@ -106,7 +106,21 @@ enum {
     GRALLOC_USAGE_PRIVATE_2             = 0x40000000,
     GRALLOC_USAGE_PRIVATE_3             = 0x80000000,
     GRALLOC_USAGE_PRIVATE_MASK          = 0xF0000000,
+
+    /* wmt mb memory */
+    GRALLOC_USAGE_WMT_MB                = GRALLOC_USAGE_PRIVATE_0
 };
+
+typedef struct 
+{
+    int     magic;      	//'WMMB'
+    long    phy_addr;      //physical address of mb memory
+    int     video_width;	//video width
+    int     video_height;   //video height
+	int     fb_width;		//aligned frame buffer width (>= video_width)
+	int     fb_height;      //aligned frame height
+	int     cookie;		    //
+}gralloc_mb_block;
 
 /*****************************************************************************/
 

@@ -16,13 +16,22 @@ LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 
+LOCAL_SRC_FILES := uaplayback.sh:system/etc/uaplayback.sh
+LOCAL_SRC_FILES += uastop.sh:system/etc/uastop.sh
+LOCAL_SRC_FILES += hdmi2usbSwitch.sh:system/etc/hdmi2usbSwitch.sh
+include $(WMT_PREBUILT)
+
+include $(CLEAR_VARS)
+
 LOCAL_MODULE := audio.usb.default
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_SRC_FILES := \
 	audio_hw.c
 LOCAL_C_INCLUDES += \
-	external/tinyalsa/include
-LOCAL_SHARED_LIBRARIES := liblog libcutils libtinyalsa
+	external/tinyalsa/include \
+	system/media/audio_utils/include \
+	$(call include-path-for, audio-utils)
+LOCAL_SHARED_LIBRARIES := liblog libcutils libtinyalsa libaudioutils
 LOCAL_MODULE_TAGS := optional
 
 include $(BUILD_SHARED_LIBRARY)

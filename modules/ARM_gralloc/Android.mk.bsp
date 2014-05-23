@@ -1,0 +1,20 @@
+LOCAL_PATH := $(call my-dir)
+
+include $(CLEAR_VARS) 
+
+
+LOCAL_SRC_FILES += gralloc.default.so:system/lib/hw/gralloc.default.so
+LOCAL_SRC_FILES += gralloc.default.so:obj/SHARED_LIBRARIES/gralloc.default_intermediates/LINKED/gralloc.default.so
+LOCAL_SRC_FILES += gralloc.default.so:symbols/system/lib/hw/gralloc.default.so
+LOCAL_SRC_FILES += gralloc.default.so:obj/lib/gralloc.default.so
+LOCAL_SRC_FILES += export_includes:obj/SHARED_LIBRARIES/gralloc.default_intermediates/export_includes 
+
+LOCAL_SRC_FILES += gralloc.wmt.so:system/lib/hw/gralloc.wmt.so
+LOCAL_SRC_FILES += gralloc.wmt.so:obj/SHARED_LIBRARIES/gralloc.wmt_intermediates/LINKED/gralloc.wmt.so
+LOCAL_SRC_FILES += gralloc.wmt.so:symbols/system/lib/hw/gralloc.wmt.so
+LOCAL_SRC_FILES += gralloc.wmt.so:obj/lib/gralloc.wmt.so
+LOCAL_SRC_FILES += export_includes:obj/SHARED_LIBRARIES/gralloc.wmt_intermediates/export_includes 
+
+
+include $(WMT_PREBUILT)
+

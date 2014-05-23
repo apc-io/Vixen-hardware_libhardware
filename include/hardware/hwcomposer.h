@@ -80,25 +80,21 @@ typedef struct hwc_color {
 
 typedef struct hwc_layer_1 {
     /*
-     * compositionType is used to specify this layer's type and is set by either
-     * the hardware composer implementation, or by the caller (see below).
+     * Initially set to HWC_FRAMEBUFFER, HWC_BACKGROUND, or
+     * HWC_FRAMEBUFFER_TARGET.
      *
-     *  This field is always reset to HWC_BACKGROUND or HWC_FRAMEBUFFER
-     *  before (*prepare)() is called when the HWC_GEOMETRY_CHANGED flag is
-     *  also set, otherwise, this field is preserved between (*prepare)()
-     *  calls.
+     * HWC_FRAMEBUFFER
+     *   Indicates the layer will be drawn into the framebuffer
+     *   using OpenGL ES. The HWC can toggle this value to HWC_OVERLAY to
+     *   indicate it will handle the layer.
      *
      * HWC_BACKGROUND
-     *   Always set by the caller before calling (*prepare)(), this value
-     *   indicates this is a special "background" layer. The only valid field
-     *   is backgroundColor.
-     *   The HWC can toggle this value to HWC_FRAMEBUFFER to indicate it CANNOT
-     *   handle the background color.
-     *
+     *   Indicates this is a special "background" layer. The only valid field
+     *   is backgroundColor. The HWC can toggle this value to HWC_FRAMEBUFFER
+     *   to indicate it CANNOT handle the background color.
      *
      * HWC_FRAMEBUFFER_TARGET
-     *   Always set by the caller before calling (*prepare)(), this value
-     *   indicates this layer is the framebuffer surface used as the target of
+     *   Indicates this layer is the framebuffer surface used as the target of
      *   OpenGL ES composition. If the HWC sets all other layers to HWC_OVERLAY
      *   or HWC_BACKGROUND, then no OpenGL ES composition will be done, and
      *   this layer should be ignored during set().
@@ -107,38 +103,13 @@ typedef struct hwc_layer_1 {
      *   HWC version is HWC_DEVICE_API_VERSION_1_1 or higher. In older versions,
      *   the OpenGL ES target surface is communicated by the (dpy, sur) fields
      *   in hwc_compositor_device_1_t.
-     *
-     *   This value cannot be set by the HWC implementation.
-     *
-     *
-     * HWC_FRAMEBUFFER
-     *   Set by the caller before calling (*prepare)() ONLY when the
-     *   HWC_GEOMETRY_CHANGED flag is also set.
-     *
-     *   Set by the HWC implementation during (*prepare)(), this indicates
-     *   that the layer will be drawn into the framebuffer using OpenGL ES.
-     *   The HWC can toggle this value to HWC_OVERLAY to indicate it will
-     *   handle the layer.
-     *
-     *
-     * HWC_OVERLAY
-     *   Set by the HWC implementation during (*prepare)(), this indicates
-     *   that the layer will be handled by the HWC (ie: it must not be
-     *   composited with OpenGL ES).
-     *
      */
     int32_t compositionType;
 
-    /*
-     * hints is bit mask set by the HWC implementation during (*prepare)().
-     * It is preserved between (*prepare)() calls, unless the
-     * HWC_GEOMETRY_CHANGED flag is set, in which case it is reset to 0.
-     *
-     * see hwc_layer_t::hints
-     */
+    /* see hwc_layer_t::hints above */
     uint32_t hints;
 
-    /* see hwc_layer_t::flags */
+    /* see hwc_layer_t::flags above */
     uint32_t flags;
 
     union {
@@ -385,14 +356,11 @@ typedef struct hwc_composer_device_1 {
      * either HWC_FRAMEBUFFER or HWC_OVERLAY. In the former case, the
      * composition for the layer is handled by SurfaceFlinger with OpenGL ES,
      * in the later case, the HWC will have to handle the layer's composition.
-     * compositionType and hints are preserved between (*prepare)() calles
-     * unless the HWC_GEOMETRY_CHANGED flag is set.
      *
      * (*prepare)() is called with HWC_GEOMETRY_CHANGED to indicate that the
      * list's geometry has changed, that is, when more than just the buffer's
      * handles have been updated. Typically this happens (but is not limited to)
-     * when a window is added, removed, resized or moved. In this case
-     * compositionType and hints are reset to their default value.
+     * when a window is added, removed, resized or moved.
      *
      * For HWC 1.0, numDisplays will always be one, and displays[0] will be
      * non-NULL.
@@ -557,10 +525,16 @@ typedef struct hwc_composer_device_1 {
     int (*getDisplayAttributes)(struct hwc_composer_device_1* dev, int disp,
             uint32_t config, const uint32_t* attributes, int32_t* values);
 
+
+    /**
+     * WMT added for HDMI/TVout property changed.
+     */
+    int (*setProp)(struct hwc_composer_device_1* dev, const char * name, const char * value);
+
     /*
      * Reserved for future use. Must be NULL.
      */
-    void* reserved_proc[4];
+    void* reserved_proc[3];
 
 } hwc_composer_device_1_t;
 

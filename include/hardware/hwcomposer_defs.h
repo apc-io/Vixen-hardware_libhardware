@@ -151,6 +151,18 @@ enum {
      * Returns a mask of supported display types.
      */
     HWC_DISPLAY_TYPES_SUPPORTED         = 2,
+
+    /*
+     * Availability: HWC_DEVICE_API_VERSION_1_1 add by wmt sam
+     * Returns supported pixel format.
+     */
+    HWC_PIXEL_FORMAT                    = 3,
+
+    /*
+	 * Availability: HWC_DEVICE_API_VERSION_1_1 add by wmt sam
+     * Return HDMI Secure
+     */
+    HWC_HDMI_SECURE			= 4,
 };
 
 /* display attributes returned by getDisplayAttributes() */

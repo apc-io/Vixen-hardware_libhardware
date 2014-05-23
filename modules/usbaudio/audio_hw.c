@@ -33,10 +33,41 @@
 
 #include <tinyalsa/asoundlib.h>
 
-struct pcm_config pcm_config = {
-    .channels = 2,
-    .rate = 44100,
-    .period_size = 1024,
+#include <audio_utils/resampler.h> //add 
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <string.h>
+
+#include <cutils/properties.h>
+
+//#define ARRAY_SIZE(s) (sizeof(s)/sizeof((s)[0]))
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+/* number of frames per short period (low latency) */
+#define SHORT_PERIOD_SIZE  1024 //1024 modify 2013-11-14
+/* number of frames per long period (low power) */
+#define LONG_PERIOD_SIZE 1024
+
+/* number of periods for low power playback */
+#define PLAYBACK_LONG_PERIOD_COUNT 2
+/* number of pseudo periods for low latency playback */
+#define PLAYBACK_SHORT_PERIOD_COUNT 2
+/* number of periods for capture */
+#define CAPTURE_PERIOD_COUNT 2
+
+/* minimum sleep time in out_write() when write threshold is not reached */
+#define MIN_WRITE_SLEEP_US 5000
+
+#define RESAMPLER_BUFFER_FRAMES (SHORT_PERIOD_SIZE * 2)
+#define RESAMPLER_BUFFER_SIZE (4 * RESAMPLER_BUFFER_FRAMES/*1024*2*/)
+
+//add 2013-11-13
+
+struct pcm_config pcm_config = {  
+    .channels = 1, //2 stereo ok! //default 2
+    .rate = 16000, //44100 32000 //44100 -->32000 ok! 441000 --->16000 ok!great!
+    .period_size = 1024,  //1024
     .period_count = 4,
     .format = PCM_FORMAT_S16_LE,
 };
@@ -56,7 +87,10 @@ struct stream_out {
     pthread_mutex_t lock; /* see note below on mutex acquisition order */
     struct pcm *pcm;
     bool standby;
-
+    
+	 struct resampler_itfe *resampler;
+	 char *buffer; //add 2013-11-13
+	 
     struct audio_device *dev;
 };
 
@@ -70,6 +104,7 @@ struct stream_out {
 /* must be called with hw device and output stream mutexes locked */
 static int start_output_stream(struct stream_out *out)
 {
+	ALOGD("<<<<%s", __func__);
     struct audio_device *adev = out->dev;
     int i;
 
@@ -83,6 +118,8 @@ static int start_output_stream(struct stream_out *out)
         pcm_close(out->pcm);
         return -ENOMEM;
     }
+    
+    out->resampler->reset(out->resampler); //add  2013-11-13
 
     return 0;
 }
@@ -91,7 +128,10 @@ static int start_output_stream(struct stream_out *out)
 
 static uint32_t out_get_sample_rate(const struct audio_stream *stream)
 {
-    return pcm_config.rate;
+	return 44100;
+	//return 32000; 
+	//return pcm_config.rate; //32000;//44100;
+    //return pcm_config.rate;
 }
 
 static int out_set_sample_rate(struct audio_stream *stream, uint32_t rate)
@@ -107,7 +147,14 @@ static size_t out_get_buffer_size(const struct audio_stream *stream)
 
 static uint32_t out_get_channels(const struct audio_stream *stream)
 {
-    return AUDIO_CHANNEL_OUT_STEREO;
+	return AUDIO_CHANNEL_OUT_STEREO; //tell audioflinger stereo, well hw mono 2013-11-15
+	if (pcm_config.channels == 2)
+		return AUDIO_CHANNEL_OUT_STEREO;
+	else
+		return AUDIO_CHANNEL_OUT_MONO;
+  //   return  pcm_config.channels; //this will make duplicat out fail to open !!! 
+    //AUDIO_CHANNEL_OUT_STEREO;    
+    //return AUDIO_CHANNEL_OUT_MONO; //add 2013-11-14
 }
 
 static audio_format_t out_get_format(const struct audio_stream *stream)
@@ -190,9 +237,21 @@ static int out_set_volume(struct audio_stream_out *stream, float left,
 static ssize_t out_write(struct audio_stream_out *stream, const void* buffer,
                          size_t bytes)
 {
+	//ALOGD("<<<<%s", __func__);
     int ret;
     struct stream_out *out = (struct stream_out *)stream;
-
+	
+	void *buf = NULL;
+	size_t frame_size = audio_stream_frame_size(&out->stream.common);//ok? channel*format
+	size_t in_frames = bytes / frame_size;// number of frame
+	size_t out_frames = RESAMPLER_BUFFER_SIZE/*8k?*/ / frame_size;
+	bool force_input_standby = false;
+	
+	int16_t *channel_buf = NULL;//add 2013-11-15
+	int16_t *tmp_buf = NULL;
+	int ci = 0;
+	int count = 0;
+	
     pthread_mutex_lock(&out->dev->lock);
     pthread_mutex_lock(&out->lock);
     if (out->standby) {
@@ -202,8 +261,39 @@ static ssize_t out_write(struct audio_stream_out *stream, const void* buffer,
         }
         out->standby = false;
     }
-
-    pcm_write(out->pcm, (void *)buffer, bytes);
+    
+    
+    /* only use resampler if required */
+    if (pcm_config.rate!= 44100) {
+        out->resampler->resample_from_input(out->resampler,
+                                            (int16_t *)buffer,
+                                            &in_frames,
+                                            (int16_t *)out->buffer,
+                                            &out_frames);
+        buf = out->buffer;
+    } else {
+        out_frames = in_frames;
+        buf = (void *)buffer;
+    } //add 2013-11-13
+	
+	//add for test channle data 2013-11-15
+    if (pcm_config.channels == 1) {
+	//ALOGD("<<< mono channel");
+	channel_buf = (int16_t *)buf;
+	tmp_buf = (int16_t *)buf;
+	count = out_frames*frame_size/(sizeof(int16_t));
+	for (ci=0; ci<count; ci++){
+		//ALOGD("0x%x  ", channel_buf[ci]);
+		channel_buf[ci] = tmp_buf[2*ci];
+	}
+	pcm_write(out->pcm, (void *)channel_buf, out_frames * frame_size /2); //add 2013-11-14	
+    }	
+	//**************************************
+   // pcm_write(out->pcm, (void *)buffer, bytes);
+   else { 
+	//ALOGD("<<< stereo channel");
+	pcm_write(out->pcm, (void *)buf, out_frames * frame_size); //add 2013-11-14
+   }	
 
     pthread_mutex_unlock(&out->lock);
     pthread_mutex_unlock(&out->dev->lock);
@@ -250,14 +340,128 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
                                    struct audio_config *config,
                                    struct audio_stream_out **stream_out)
 {
+	ALOGD("<<<<%s just in sr %d, channel 0x%x", __func__, config->sample_rate, config->channel_mask);
     struct audio_device *adev = (struct audio_device *)dev;
     struct stream_out *out;
     int ret;
-
+	
+	
+	
     out = (struct stream_out *)calloc(1, sizeof(struct stream_out));
     if (!out)
         return -ENOMEM;
-
+	
+	//add 2013-11-15 for detect usb audio,hw param, sample rate&channel
+	int channel_fd = -1;
+    //#define STREAM0 "/proc/asound/card1/stream0"
+	//char STREAM0[] = "/proc/asound/card1/stream0";
+	char *STREAM0 = "/proc/asound/card1/stream0";
+	char rd_buf[1024] = {0};
+	int rd_len = 0;
+	char *tmp_p = NULL;
+	int usb_channel = 2;
+	
+	int card = 1, device = 0; //!!!!!
+	int sample_rates[] = {44100, 48000, 32000, 22050, 16000, 11025, 8000 };
+	int i = 0;
+	
+	char buf[PROPERTY_VALUE_MAX] = {0};
+	property_get("wmt.usb.audio.card", buf, "1");
+	ALOGD("<<<<%s prop %c", __func__, buf[0]);
+	if (strcmp(buf, "1") == 0)
+	{
+		STREAM0 = "/proc/asound/card1/stream0";
+		card = 1;
+	}
+	
+	if (strcmp(buf, "2") == 0)
+	{
+		STREAM0 = "/proc/asound/card2/stream0";
+		card = 2;
+	}
+	ALOGD(" %s --- stream0 %s", __func__, STREAM0);
+	
+	if (1) {
+			
+			channel_fd = open(STREAM0, O_RDONLY);
+			if (channel_fd < 0)
+			{
+				ALOGW(" open %s error :%s", STREAM0, strerror(errno));
+				close(channel_fd);
+				
+				goto CHA_END;
+			}
+			rd_len = read(channel_fd, rd_buf, sizeof(rd_buf));
+			if (rd_len < 0)
+			{
+				ALOGW("read %s error: %s", STREAM0, strerror(errno));
+				close(channel_fd);
+				
+				goto CHA_END;
+			}
+			ALOGD("read content :%s", rd_buf);
+			tmp_p = strstr(rd_buf, "Playback:");
+			if (!tmp_p)
+			{
+				ALOGW("can't find Playback: string");
+				goto CHA_END;
+				close(channel_fd);
+				
+			}
+			ALOGD("Playback string: %s", tmp_p);
+	
+			tmp_p = strstr(tmp_p, "Channels:");
+	
+			if (!tmp_p)
+			{
+				ALOGW("can't find Channels: string");
+				close(channel_fd);
+				goto CHA_END;
+				
+			}
+			ALOGD("channel string: %s", tmp_p);
+			sscanf(tmp_p, "Channels: %d", &usb_channel);
+			ALOGD("<<<<<<<<<< usb channel %d", usb_channel);
+			pcm_config.channels = usb_channel;			
+			close(channel_fd);
+			
+		}
+	CHA_END :
+		//try a proper sample rate
+	for (i = 0; i < ARRAY_SIZE(sample_rates); i++) {
+		pcm_config.rate = sample_rates[i];
+		//ALOGD("sample array %d", ARRAY_SIZE(sample_rates));
+		
+		out->pcm = pcm_open(card, device, PCM_OUT, &pcm_config);
+             if (!pcm_is_ready(out->pcm)) {
+                 ALOGW("cannot open pcm_in driver: %s; samplerate: %d", pcm_get_error(out->pcm), sample_rates[i]);
+                 pcm_close(out->pcm);
+               
+                 continue;
+             }
+             else {
+		 ALOGD("%s find proper sample rate %d", __func__, pcm_config.rate);
+		 pcm_close(out->pcm);
+                 break;
+             }
+        }
+	
+	
+	
+	if (i == ARRAY_SIZE(sample_rates))
+	{
+		ALOGE("%s can't find proper sample rate!", __func__);
+	}
+	//add end 2013-11-15
+	
+	 ret = create_resampler(/*DEFAULT_OUT_SAMPLING_RATE*/44100,
+                           /*FULL_POWER_SAMPLING_RATE*/pcm_config.rate, 
+                           2, /*channel*/
+                           RESAMPLER_QUALITY_DEFAULT,
+                           NULL,
+                           &out->resampler); //add 2013-11-13
+	 out->buffer = malloc(RESAMPLER_BUFFER_SIZE); /* todo: allow for reallocing */ //add 2013-11-15
+	 
     out->stream.common.get_sample_rate = out_get_sample_rate;
     out->stream.common.set_sample_rate = out_set_sample_rate;
     out->stream.common.get_buffer_size = out_get_buffer_size;
@@ -286,7 +490,9 @@ static int adev_open_output_stream(struct audio_hw_device *dev,
 
     adev->card = -1;
     adev->device = -1;
-
+	
+	ALOGD("<<<<%s just out sr %d, pcmconfig sr %d, channel 0x%x", __func__, config->sample_rate, pcm_config.rate, config->channel_mask);
+	
     *stream_out = &out->stream;
     return 0;
 
@@ -300,7 +506,7 @@ static void adev_close_output_stream(struct audio_hw_device *dev,
                                      struct audio_stream_out *stream)
 {
     struct stream_out *out = (struct stream_out *)stream;
-
+	ALOGD("<<<<%s", __func__);
     out_standby(&stream->common);
     free(stream);
 }
@@ -384,7 +590,7 @@ static int adev_open(const hw_module_t* module, const char* name,
 {
     struct audio_device *adev;
     int ret;
-
+	ALOGD("<<<<%s", __func__);
     if (strcmp(name, AUDIO_HARDWARE_INTERFACE) != 0)
         return -EINVAL;
 
